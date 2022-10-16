@@ -62,6 +62,7 @@ Base.rand(rng::AbstractRNG, t::NTuple{L,Symbol}) where L = t[rand(rng, 1:length(
 
 
 const dir = Dict(:up=>GWPos(0,1), :down=>GWPos(0,-1), :left=>GWPos(-1,0), :right=>GWPos(1,0))
+const dir_tup = (GWPos(0,1), GWPos(0,-1), GWPos(-1,0), GWPos(1,0))
 const aind = Dict(:up=>1, :down=>2, :left=>3, :right=>4)
 
 POMDPs.actionindex(mdp::SimpleGridWorld, a::Symbol) = aind[a]
@@ -71,30 +72,34 @@ POMDPs.actionindex(mdp::SimpleGridWorld, a::Symbol) = aind[a]
 
 POMDPs.isterminal(m::SimpleGridWorld, s::AbstractVector{Int}) = any(s.<0)
 
+add(v::SVector, i, x) = setindex(v, v[i] + x, i)
+
 function POMDPs.transition(mdp::SimpleGridWorld, s::AbstractVector{Int}, a::Symbol)
     if s in mdp.terminate_from || isterminal(mdp, s)
         return Deterministic(GWPos(-1,-1))
     end
+    na = length(actions(mdp))
+    destinations = @SVector(zeros(GWPos, na+1))
+    destinations = setindex(destinations, s, 1) # destinations[1] = s
 
-    destinations = MVector{length(actions(mdp))+1, GWPos}(undef)
-    destinations[1] = s
-
-    probs = @MVector(zeros(length(actions(mdp))+1))
+    probs = @SVector zeros(na+1)
+    undesired_prob = (1.0 - mdp.tprob)/(na - 1)
     for (i, act) in enumerate(actions(mdp))
-        if act == a
-            prob = mdp.tprob # probability of transitioning to the desired cell
+        prob = if act == a
+            mdp.tprob # probability of transitioning to the desired cell
         else
-            prob = (1.0 - mdp.tprob)/(length(actions(mdp)) - 1) # probability of transitioning to another cell
+            undesired_prob # probability of transitioning to another cell
         end
 
-        dest = s + dir[act]
-        destinations[i+1] = dest
+        dest = s + dir_tup[i]
+        destinations = setindex(destinations, dest, i+1) # destinations[i+1] = dest
 
         if !inbounds(mdp, dest) # hit an edge and come back
-            probs[1] += prob
-            destinations[i+1] = GWPos(-1, -1) # dest was out of bounds - this will have probability zero, but it should be a valid state
+            probs = add(probs, 1, prob) # probs[1] += prob
+            # dest was out of bounds - this will have probability zero, but it should be a valid state
+            destinations = setindex(destinations, GWPos(-1,-1), i+1) # destinations[i+1] = GWPos(-1, -1)
         else
-            probs[i+1] += prob
+            probs = add(probs, i+1, prob)# probs[i+1] += prob
         end
     end
 
